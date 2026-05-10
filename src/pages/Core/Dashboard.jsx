@@ -19,6 +19,7 @@ import {
 import { useApp } from '../../state/AppContext';
 import { useTelemetry } from '../../state/TelemetryContext';
 import { getHealthColor } from '../../logic/healthEngine';
+import { visionBackendEndpoints } from '../../utils/visionBackendUrl';
 
 // ─── ANIMATION CONFIGS ──────────────────────────────────────────────────────
 const springConfig = { type: "spring", stiffness: 300, damping: 30 };
@@ -39,13 +40,15 @@ const itemFadeUp = {
 /**
  * HealthOverview: Cinematic Hero Card
  */
-const HealthOverview = React.memo(({ score, systemHealth, devices }) => {
+const HealthOverview = React.memo(({ score, systemHealth, devices, visionOnline }) => {
   const activeNodesCount = ['soil_node', 'water_node', 'weather_node', 'storage_node', 'vision_node']
-    .filter(id => devices?.[id]?.status === 'ACTIVE' || devices?.[id]?.status === 'PARTIAL').length;
+    .filter(id => {
+      if (id === 'vision_node') return visionOnline;
+      return devices?.[id]?.status === 'ACTIVE' || devices?.[id]?.status === 'PARTIAL';
+    }).length;
     
   const isOffline = activeNodesCount === 0;
   const healthColor = isOffline ? 'var(--text-inactive)' : getHealthColor(score || 0);
-  const visionOnline = devices?.vision_node?.status === 'ACTIVE' || devices?.vision_node?.status === 'PARTIAL';
   
   const totalNodesCount = 5;
 
@@ -187,58 +190,103 @@ const SensorCard = React.memo(({ title, icon: Icon, color, status, score, onClic
   );
 });
 
-const CamCard = React.memo(({ isOnline, streamUrl, onClick }) => (
-  <motion.div
-    variants={itemFadeUp}
-    whileTap={{ scale: 0.98 }}
-    onClick={onClick}
-    style={{
-      background: 'var(--bg-card)', borderRadius: 'var(--radius-xl)', padding: '0.75rem',
-      border: '1px solid var(--glass-stroke)', boxShadow: 'var(--shadow-md)',
-      cursor: 'pointer', position: 'relative', overflow: 'hidden',
-      height: '220px', width: '100%'
-    }}
-  >
-    <div style={{ position: 'relative', borderRadius: 'calc(var(--radius-xl) - 8px)', overflow: 'hidden', height: '100%', background: 'var(--bg-dark)' }}>
-      {isOnline ? (
-        <motion.img 
-          key={streamUrl}
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-          src={streamUrl} 
-          alt="Field" 
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-        />
-      ) : (
-        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-main)', gap: '10px' }}>
-          <Camera size={48} color="var(--text-inactive)" />
-          <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.05em' }}>FEED OFFLINE</span>
-        </div>
-      )}
-      
-      <div style={{ 
-        position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', 
-        background: isOnline ? 'linear-gradient(to bottom, var(--bg-overlay) 0%, transparent 40%, transparent 70%, var(--bg-overlay) 100%)' : 'var(--bg-overlay)', 
-        display: 'flex', alignItems: 'center', justifyContent: 'center' 
-      }}>
-        {!isOnline && (
-          <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'var(--bg-card)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-stroke)' }}>
-            <WifiOff size={24} color="var(--text-inactive)" />
+const CamCard = React.memo(({ isOnline, streamUrl, httpBase, onClick }) => {
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [loadError, setLoadError] = useState(false);
+  
+  const isNative = typeof window !== 'undefined' && !!window.Capacitor?.isNativePlatform?.();
+
+  useEffect(() => {
+    setLoadError(false);
+    if (!isNative || !isOnline) {
+      setPreviewUrl(null);
+      return undefined;
+    }
+    
+    let active = true;
+    let lastObjUrl = null;
+
+    const pollFrame = async () => {
+      try {
+        const res = await fetch(`${httpBase}/frame/cam1?_cb=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error();
+        const blob = await res.blob();
+        if (!active || blob.size < 100) return;
+        const nUrl = URL.createObjectURL(blob);
+        setPreviewUrl(prev => {
+          if (lastObjUrl) URL.revokeObjectURL(lastObjUrl);
+          return nUrl;
+        });
+        lastObjUrl = nUrl;
+      } catch (_) {}
+    };
+    pollFrame();
+    const it = setInterval(pollFrame, 3500);
+    return () => {
+      active = false;
+      clearInterval(it);
+      if (lastObjUrl) URL.revokeObjectURL(lastObjUrl);
+    };
+  }, [isNative, isOnline, httpBase]);
+
+  const actualActive = isOnline && !loadError;
+  const finalSrc = isNative ? (previewUrl || '') : streamUrl;
+
+  return (
+    <motion.div
+      variants={itemFadeUp}
+      whileTap={{ scale: 0.98 }}
+      onClick={onClick}
+      style={{
+        background: 'var(--bg-card)', borderRadius: 'var(--radius-xl)', padding: '0.75rem',
+        border: '1px solid var(--glass-stroke)', boxShadow: 'var(--shadow-md)',
+        cursor: 'pointer', position: 'relative', overflow: 'hidden',
+        height: '220px', width: '100%'
+      }}
+    >
+      <div style={{ position: 'relative', borderRadius: 'calc(var(--radius-xl) - 8px)', overflow: 'hidden', height: '100%', background: 'var(--bg-dark)' }}>
+        {actualActive ? (
+          <motion.img 
+            key={finalSrc}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            src={finalSrc} 
+            alt="Field" 
+            onError={() => !isNative && setLoadError(true)}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+          />
+        ) : (
+          <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-main)', gap: '10px' }}>
+            <Camera size={48} color="var(--text-inactive)" />
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.05em' }}>FEED OFFLINE</span>
           </div>
         )}
-      </div>
+        
+        <div style={{ 
+          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', 
+          background: actualActive ? 'linear-gradient(to bottom, var(--bg-overlay) 0%, transparent 40%, transparent 70%, var(--bg-overlay) 100%)' : 'var(--bg-overlay)', 
+          display: 'flex', alignItems: 'center', justifyContent: 'center' 
+        }}>
+          {!actualActive && (
+            <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'var(--bg-card)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-stroke)' }}>
+              <WifiOff size={24} color="var(--text-inactive)" />
+            </div>
+          )}
+        </div>
 
-      <div style={{ position: 'absolute', top: '16px', left: '16px', padding: '6px 12px', background: 'var(--bg-overlay)', backdropFilter: 'blur(12px)', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '8px', border: '1px solid var(--glass-stroke)' }}>
-        <span style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '0.05em' }}>Vision Feed</span>
-      </div>
+        <div style={{ position: 'absolute', top: '16px', left: '16px', padding: '6px 12px', background: 'var(--bg-overlay)', backdropFilter: 'blur(12px)', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--glass-stroke)' }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: actualActive ? '#10B981' : '#EF4444' }} />
+          <span style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '0.05em' }}>AI Cam View</span>
+        </div>
 
-      <div style={{ position: 'absolute', bottom: '16px', right: '16px' }}>
-        <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'var(--primary-soft)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-border)' }}>
-          <Navigation size={18} color="var(--primary)" />
+        <div style={{ position: 'absolute', bottom: '16px', right: '16px' }}>
+          <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'var(--primary-soft)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-border)' }}>
+            <Navigation size={18} color="var(--primary)" />
+          </div>
         </div>
       </div>
-    </div>
-  </motion.div>
-));
+    </motion.div>
+  );
+});
 
 const ControlsCard = React.memo(({ actuators, toggleActuator, ACTUATORS }) => {
   const controls = [
@@ -503,7 +551,40 @@ const Dashboard = () => {
   const { sensorData, farmHealthScore, systemHealth, devices, sensorHistory } = useTelemetry();
 
   const [isSyncing, setIsSyncing] = useState(false);
-  const visionOnline = devices?.vision_node?.status === 'ACTIVE' || devices?.vision_node?.status === 'PARTIAL';
+
+  // Autonomous AI Vision detection
+  const defaultIP = '192.168.29.35';
+  const { httpBase } = useMemo(() => {
+    try {
+      const saved = localStorage.getItem('agrisense_backend_ip') || defaultIP;
+      return visionBackendEndpoints(saved, defaultIP);
+    } catch {
+      return visionBackendEndpoints(defaultIP, defaultIP);
+    }
+  }, []);
+
+  const [visionOnline, setVisionOnline] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const res = await fetch(`${httpBase}/health`, { cache: 'no-store' });
+        if (res.ok) {
+          if (alive) setVisionOnline(true);
+        } else {
+          if (alive) setVisionOnline(false);
+        }
+      } catch {
+        if (alive) setVisionOnline(false);
+      }
+    };
+    check();
+    const it = setInterval(check, 12000);
+    return () => { alive = false; clearInterval(it); };
+  }, [httpBase]);
+
+  const streamUrl = useMemo(() => `${httpBase}/stream/cam1?_cb=${Date.now()}`, [httpBase]);
 
   const handleSync = () => {
     setIsSyncing(true);
@@ -553,7 +634,7 @@ const Dashboard = () => {
       </motion.section>
 
       {/* Hero Health Overview */}
-      <HealthOverview score={farmHealthScore} systemHealth={systemHealth} devices={devices} />
+      <HealthOverview score={farmHealthScore} systemHealth={systemHealth} devices={devices} visionOnline={visionOnline} />
 
       {/* Sensor Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
@@ -590,7 +671,8 @@ const Dashboard = () => {
       {/* Camera View */}
       <CamCard
         isOnline={visionOnline}
-        streamUrl={`http://${sensorData?.vision?.ip || '192.168.4.2'}:81/stream`}
+        httpBase={httpBase}
+        streamUrl={streamUrl}
         onClick={() => navigate('/camera')}
       />
 

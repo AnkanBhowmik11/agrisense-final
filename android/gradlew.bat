@@ -25,7 +25,7 @@
 
 @rem Set local scope for the variables with windows NT shell
 if "%OS%"=="Windows_NT" setlocal
-set JAVA_HOME=D:\Android Studio\jbr
+set JAVA_HOME=C:\Program Files\JetBrains\PyCharm 2025.2.4\jbr
 
 set DIRNAME=%~dp0
 if "%DIRNAME%"=="" set DIRNAME=.

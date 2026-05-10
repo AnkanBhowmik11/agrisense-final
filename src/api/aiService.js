@@ -7,12 +7,14 @@ import { MASTER_CONFIG } from '../setup';
 
 // 🔐 INDUSTRIAL KEY INJECTION (Direct Priority)
 const GEMINI_API_KEY = MASTER_CONFIG.GEMINI_API_KEY;
+const GROQ_API_KEY = MASTER_CONFIG.GROQ_API_KEY || import.meta.env.VITE_GROQ_API_KEY;
 
 // 💡 Diagnostic: Log key status on load (Sanitized)
+if (GROQ_API_KEY) {
+  console.log(`🛰️ AgriBot: Groq Cloud AI Engine Initialized (Llama Fallback Active)`);
+}
 if (GEMINI_API_KEY && GEMINI_API_KEY.length > 10) {
-  console.log(`🛰️ AgriBot: Cloud AI Engine Active (Handshake Ready)`);
-} else {
-  console.warn("🛰️ AgriBot: Cloud AI Engine Offline (Key check failed).");
+  console.log(`🛰️ AgriBot: Google Gemini Cloud AI Engine Active (Handshake Ready)`);
 }
 
 /**
@@ -78,31 +80,43 @@ const localAgriLogic = (prompt, context) => {
     return response;
   }
 
-  // 5. Suitability & Region
-  if (query.includes('suit') || query.includes('grow') || query.includes('season') || query.includes('place')) {
-    const suitability = knowledgeBase?.suitabilityHighlights?.slice(0, 5).join('\n- ');
-    return `🌍 REGIONAL SUITABILITY:\n- ${suitability}\n\nAdvice: Check your local district logic in logic.csv for micro-climate matching.`;
-  }
-
-  // 6. General Knowledge Fallback
-  return "I'm currently analyzing your data using my Local Diagnostic Engine. I can help with 'status', 'irrigation', 'pests', 'NPK', or 'suitability'! To enable the full Cloud AI Brain, ensure your Gemini API key is active. 🌿";
+  return "I'm currently analyzing your data using my Local Diagnostic Engine. I can help with 'status', 'irrigation', 'pests', 'NPK', or 'suitability'! To enable the full Cloud AI Brain, ensure your Gemini or Groq API key is active. 🌿";
 };
 
 /**
- * Sends a message to Gemini AI with context data.
+ * Uses Groq API (Llama-3-70b-versatile or 8b) as an ultra-fast fallback/alternative.
+ */
+const askGroq = async (prompt, systemPrompt) => {
+  if (!GROQ_API_KEY) throw new Error("No Groq key available.");
+  const url = 'https://api.groq.com/openai/v1/chat/completions';
+  
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GROQ_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile", // High capacity model
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.5,
+      max_tokens: 1024
+    })
+  });
+  
+  if (!res.ok) throw new Error("Groq endpoint failed");
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content;
+};
+
+/**
+ * Sends a message to Cloud AI with context data.
+ * Auto-routes to Gemini (standard) or Groq (fallback/alt) as available.
  */
 export const askGemini = async (prompt, context) => {
-  if (!GEMINI_API_KEY) {
-    console.warn("AgriBot: No valid API key found. Falling back to local diagnostic engine.");
-    return localAgriLogic(prompt, context);
-  }
-
-  const models = [
-    "gemini-1.5-flash",
-    "gemini-1.5-pro",
-    "gemini-pro"
-  ];
-
   const slimContext = {
     sensors: context.currentSensors,
     weather: context.weather,
@@ -111,27 +125,36 @@ export const askGemini = async (prompt, context) => {
     time: context.time
   };
 
-  const fullPrompt = `
-You are AgriSense AI, an elite agronomy assistant. 
+  const systemPrompt = `You are AgriSense AI, an elite agronomy assistant. 
 Data Context:
-- Farm: ${context.farmName}
+- Farm: ${context.farmName || 'Global Plot'}
 - Sensors: ${JSON.stringify(slimContext.sensors)}
 - Weather: ${JSON.stringify(slimContext.weather)}
 - System: ${JSON.stringify(slimContext.health)}
 - History: ${JSON.stringify(slimContext.logs)}
 
-Instructions:
-1. Provide a professional, concise response.
-2. Use markdown for structure (h3 for sections).
-3. Be action-oriented. If sensors are bad, suggest fixes.
-4. If asked about status, summarize all sensors.
+Instructions: Provide professional, concise, action-oriented agronomic responses. Always call out specific Soil Moisture and NPK (Nitrogen, Phosphorus, Potassium) levels explicitly in your analysis whenever they are available in the telemetry. Avoid conversational fillers.`;
 
-User: ${prompt}
-`;
+  // 🚀 STRATEGY: Try Groq first IF explicitly setup (lightning fast token economy) OR fallback if Gemini key fails.
+  // For seamless migration, we attempt Groq if Groq exists, falling back to Gemini, then Local.
+  
+  if (GROQ_API_KEY) {
+    try {
+      console.log("🛰️ Forwarding request to Groq (Llama-3)");
+      const res = await askGroq(prompt, systemPrompt);
+      if (res) return res;
+    } catch (e) {
+      console.warn("Groq execution failed, attempting Gemini fallback...", e.message);
+    }
+  }
 
+  if (!GEMINI_API_KEY) {
+    return localAgriLogic(prompt, context);
+  }
+
+  const fullPrompt = `${systemPrompt}\n\nUser: ${prompt}`;
   const model = "gemini-flash-latest";
-  const apiVersion = "v1beta";
-  const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   
   try {
     const response = await fetch(url, {
@@ -142,27 +165,19 @@ User: ${prompt}
       },
       body: JSON.stringify({
         contents: [{ parts: [{ text: fullPrompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 1024,
-        }
+        generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
       })
     });
 
     const data = await response.json();
 
-    if (response.ok) {
-      if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        return data.candidates[0].content.parts[0].text;
-      }
-    } else {
-      console.warn(`🛰️ AgriBot Error [${response.status}]:`, data.error?.message || response.statusText);
-      throw new Error(data.error?.message || "Cloud AI Offline");
+    if (response.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+      return data.candidates[0].content.parts[0].text;
     }
   } catch (e) {
-    console.error("🛰️ AgriBot Network Exception:", e.message);
+    console.error("🛰️ Gemini Network Exception:", e.message);
   }
 
-  console.error("🛰️ AgriBot: Cloud AI failed. Using Local Diagnostic Engine.");
+  console.error("🛰️ Cloud AI totally offline. Defaulting to Local Diagnostic Engine.");
   return localAgriLogic(prompt, context);
 };

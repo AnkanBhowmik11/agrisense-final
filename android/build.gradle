@@ -24,7 +24,7 @@ allprojects {
     }
 
     // Redirect build directory to avoid OneDrive/Windows file locks on Desktop
-    buildDir = "C:/Users/polu1/AppData/Local/Temp/AgriSenseBuild/${project.name}"
+    buildDir = "C:/Users/ankan/AppData/Local/Temp/AgriSenseBuild/${project.name}"
 }
 
 

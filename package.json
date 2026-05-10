@@ -16,6 +16,8 @@
     "android:clean": "powershell -Command \"Remove-Item -Path android/app/build, android/build, node_modules/@capacitor/app/android/build, node_modules/@capacitor/android/capacitor/build -Recurse -Force -ErrorAction SilentlyContinue\""
   },
   "dependencies": {
+    "@capacitor-community/media": "^9.1.0",
+    "@capacitor-firebase/authentication": "^8.2.0",
     "@capacitor/app": "^8.0.1",
     "@capacitor/camera": "^8.2.0",
     "@capacitor/filesystem": "^8.1.2",

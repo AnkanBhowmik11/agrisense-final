@@ -62,11 +62,10 @@ export const processMqttMessage = (topic, data, prev) => {
       newState.soil.moisture = getVal(sData, ['moisture', 'm', 'hum'], prev.soil.moisture);
       newState.soil.ph = getVal(sData, ['ph'], prev.soil.ph);
       newState.soil.temp = getVal(sData, ['temp', 'st', 't'], prev.soil.temp);
-      if (sData.npk) {
-        newState.soil.npk.n = getVal(sData.npk, ['n', 'N'], prev.soil.npk.n);
-        newState.soil.npk.p = getVal(sData.npk, ['p', 'P'], prev.soil.npk.p);
-        newState.soil.npk.k = getVal(sData.npk, ['k', 'K'], prev.soil.npk.k);
-      }
+      const npkSource = sData.npk || sData;
+      newState.soil.npk.n = getVal(npkSource, ['n', 'N'], prev.soil.npk.n);
+      newState.soil.npk.p = getVal(npkSource, ['p', 'P'], prev.soil.npk.p);
+      newState.soil.npk.k = getVal(npkSource, ['k', 'K'], prev.soil.npk.k);
       newState.soil.oledActive = getVal(sData, ['oled', 'display'], prev.soil.oledActive);
       newState.soil.healthIndex = calculateNodeHealth('soil', newState.soil);
     }
@@ -121,11 +120,10 @@ export const processMqttMessage = (topic, data, prev) => {
       newState.soil.moisture = getVal(data, ['moisture', 'm', 'hum'], prev.soil.moisture);
       newState.soil.temp = getVal(data, ['temp', 't', 'st'], prev.soil.temp);
       newState.soil.ph = getVal(data, ['ph'], prev.soil.ph);
-      if (data.npk) {
-        newState.soil.npk.n = getVal(data.npk, ['n', 'N'], prev.soil.npk.n);
-        newState.soil.npk.p = getVal(data.npk, ['p', 'P'], prev.soil.npk.p);
-        newState.soil.npk.k = getVal(data.npk, ['k', 'K'], prev.soil.npk.k);
-      }
+      const npkFallback = data.npk || data;
+      newState.soil.npk.n = getVal(npkFallback, ['n', 'N'], prev.soil.npk.n);
+      newState.soil.npk.p = getVal(npkFallback, ['p', 'P'], prev.soil.npk.p);
+      newState.soil.npk.k = getVal(npkFallback, ['k', 'K'], prev.soil.npk.k);
     } else {
       newState.soil.moisture = getVal(data, [], prev.soil.moisture);
     }

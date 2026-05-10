@@ -14,15 +14,13 @@
       "splashImmersive": true
     },
     "FirebaseAuthentication": {
-      "skipNativeAuth": false,
+      "skipNativeAuth": true,
       "providers": ["google.com"],
       "google_client_id": "981404446811-4ckmk5q4phlsv32l5fk4ll4jki09om0t.apps.googleusercontent.com",
       "clientId": "981404446811-4ckmk5q4phlsv32l5fk4ll4jki09om0t.apps.googleusercontent.com"
     }
   },
   "server": {
-    "androidScheme": "https",
-    "allowMixedContent": true,
     "cleartext": true
   }
 }
